@@ -1,11 +1,13 @@
+import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { NextResponse } from "next/server";
 import { convertHtmlToPdf } from "@/lib/pdf/convertHtmlToPdf";
-import { sendPdfEmail } from "@/lib/email/sendPdfEmail";
+import { sendPdfEmail, resolvePdfFilename } from "@/lib/email/sendPdfEmail";
 import { sanitizeHtml } from "@/lib/html/sanitizeHtml";
 import {
-  logConversionCompleted,
-  logConversionFailed,
-  logConversionStarted,
+  createConversionRun,
+  markConversionCompleted,
+  markConversionFailed,
 } from "@/lib/db";
 import { safeParseConvertFields } from "@/lib/validation";
 
@@ -34,6 +36,24 @@ function firstValidationError(
   return v || "Please check your input and try again.";
 }
 
+function fileExtensionFromName(name: string): string {
+  const n = name.toLowerCase();
+  if (n.endsWith(".html")) {
+    return ".html";
+  }
+  if (n.endsWith(".htm")) {
+    return ".htm";
+  }
+  return "";
+}
+
+function getErrCode(e: unknown): string | undefined {
+  if (e && typeof e === "object" && "code" in e) {
+    return String((e as { code: unknown }).code);
+  }
+  return undefined;
+}
+
 export async function POST(request: Request) {
   let formData: FormData;
   try {
@@ -53,6 +73,21 @@ export async function POST(request: Request) {
     return VAL_ERROR("Please upload an HTML file.");
   }
 
+  if (
+    !process.env.ZOHO_SMTP_USER?.trim() ||
+    !process.env.ZOHO_SMTP_APP_PASSWORD ||
+    !process.env.FROM_EMAIL?.trim()
+  ) {
+    console.error("Zoho SMTP or FROM_EMAIL is not configured.");
+    return ERR_500();
+  }
+  if (!process.env.ZOHO_SMTP_HOST) {
+    process.env.ZOHO_SMTP_HOST = "smtp.zoho.com";
+  }
+  if (!process.env.ZOHO_SMTP_PORT) {
+    process.env.ZOHO_SMTP_PORT = "465";
+  }
+
   const parsed = safeParseConvertFields({
     email,
     filename: file.name,
@@ -64,43 +99,84 @@ export async function POST(request: Request) {
 
   const { email: cleanEmail, filename, fileSizeBytes } = parsed.data;
 
-  let html: string;
+  let ab: ArrayBuffer;
   try {
-    html = await file.text();
+    ab = await file.arrayBuffer();
   } catch (e) {
     console.error("Failed to read upload:", e);
     return VAL_ERROR("We could not read the uploaded file.");
   }
+  const buf = Buffer.from(ab);
+  const originalFileSha256 = createHash("sha256").update(buf).digest("hex");
+  const html = buf.toString("utf8");
+  const ext = fileExtensionFromName(filename);
+  const outputFilename = resolvePdfFilename(filename);
+
+  const hasDb = Boolean(process.env.DATABASE_URL?.trim());
+  let runId: string | null = null;
+  if (hasDb) {
+    try {
+      runId = await createConversionRun({
+        recipientEmail: cleanEmail,
+        originalFilename: filename,
+        originalFileExtension: ext,
+        originalFileSizeBytes: fileSizeBytes,
+        originalFileSha256,
+        outputFilename,
+      });
+    } catch (e) {
+      console.error("createConversionRun failed:", e);
+    }
+  }
 
   const sanitized = sanitizeHtml(html);
 
-  let logId: string | null = null;
+  const tPipeline0 = performance.now();
   try {
-    logId = await logConversionStarted({
-      email: cleanEmail,
-      originalFilename: filename,
-      fileSizeBytes,
-    });
-  } catch (e) {
-    console.error("logConversionStarted (unexpected):", e);
-  }
-
-  try {
+    const t0 = performance.now();
     const pdf = await convertHtmlToPdf(sanitized);
+    const t1 = performance.now();
+    const renderDurationMs = Math.round(t1 - t0);
+
+    const t2 = performance.now();
     await sendPdfEmail({
       to: cleanEmail,
       pdfBuffer: pdf,
       originalFilename: filename,
     });
-    await logConversionCompleted(logId);
+    const t3 = performance.now();
+    const emailDurationMs = Math.round(t3 - t2);
+    const totalDurationMs = Math.round(t3 - tPipeline0);
+
+    if (runId) {
+      try {
+        await markConversionCompleted({
+          id: runId,
+          outputFileSizeBytes: pdf.length,
+          renderDurationMs,
+          emailDurationMs,
+          totalDurationMs,
+        });
+      } catch (e) {
+        console.error("markConversionCompleted failed:", e);
+      }
+    }
+
     return OK_JSON("PDF converted and emailed successfully.");
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
+    const err = e instanceof Error ? e : new Error(String(e));
     console.error("POST /api/convert failed:", e);
-    try {
-      await logConversionFailed(logId, message);
-    } catch (dbE) {
-      console.error("logConversionFailed (unexpected):", dbE);
+    if (runId) {
+      try {
+        await markConversionFailed({
+          id: runId,
+          errorMessage: err.message,
+          errorCode: getErrCode(e),
+          totalDurationMs: Math.round(performance.now() - tPipeline0),
+        });
+      } catch (dbE) {
+        console.error("markConversionFailed failed:", dbE);
+      }
     }
     return ERR_500();
   }
