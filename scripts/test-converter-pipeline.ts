@@ -64,6 +64,8 @@ async function run() {
     const smtpUser = need("ZOHO_SMTP_USER", process.env.ZOHO_SMTP_USER);
     need("ZOHO_SMTP_APP_PASSWORD", process.env.ZOHO_SMTP_APP_PASSWORD);
     need("FROM_EMAIL", process.env.FROM_EMAIL);
+    need("PDF_WORKER_URL", process.env.PDF_WORKER_URL);
+    need("PDF_WORKER_TOKEN", process.env.PDF_WORKER_TOKEN);
     if (!process.env.ZOHO_SMTP_HOST) {
       process.env.ZOHO_SMTP_HOST = "smtp.zoho.com";
     }
@@ -101,7 +103,10 @@ async function run() {
     const tPipeline0 = performance.now();
     const sanitized = sanitizeHtml(html);
     const t0 = performance.now();
-    const pdf = await convertHtmlToPdf(sanitized);
+    const pdf = await convertHtmlToPdf({
+      html: sanitized,
+      runId,
+    });
     const t1 = performance.now();
     const renderDurationMs = Math.round(t1 - t0);
     if (pdf.length <= 1000) {

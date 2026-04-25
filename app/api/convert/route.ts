@@ -82,6 +82,13 @@ export async function POST(request: Request) {
     console.error("Zoho SMTP or FROM_EMAIL is not configured.");
     return ERR_500();
   }
+  if (
+    !process.env.PDF_WORKER_URL?.trim() ||
+    !process.env.PDF_WORKER_TOKEN?.trim()
+  ) {
+    console.error("PDF_WORKER_URL or PDF_WORKER_TOKEN is not configured.");
+    return ERR_500();
+  }
   if (!process.env.ZOHO_SMTP_HOST) {
     process.env.ZOHO_SMTP_HOST = "smtp.zoho.com";
   }
@@ -135,7 +142,10 @@ export async function POST(request: Request) {
   const tPipeline0 = performance.now();
   try {
     const t0 = performance.now();
-    const pdf = await convertHtmlToPdf(sanitized);
+    const pdf = await convertHtmlToPdf({
+      html: sanitized,
+      runId: runId ?? undefined,
+    });
     const t1 = performance.now();
     const renderDurationMs = Math.round(t1 - t0);
 

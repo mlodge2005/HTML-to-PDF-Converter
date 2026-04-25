@@ -1,72 +1,58 @@
-import { chromium, type Route } from "playwright";
-
-const PDF_OPTIONS = {
-  format: "Letter" as const,
-  printBackground: true,
-  margin: {
-    top: "0.5in",
-    right: "0.5in",
-    bottom: "0.5in",
-    left: "0.5in",
-  },
-};
+const WORKER_FETCH_MS = 55_000;
 
 /**
- * Disallows scripts, dynamic fetches, and public URLs. Data/blob assets are allowed; the
- * main document is only `about:blank` (how `setContent` loads).
+ * Calls the private VPS Playwright worker. Vercel does not bundle or run Chromium.
  */
-function shouldBlockRequest(url: string, type: string): boolean {
-  if (["script", "xhr", "fetch", "websocket", "eventsource", "ping", "texttrack", "manifest", "cspreport"].includes(type)) {
-    return true;
+export async function convertHtmlToPdf(args: {
+  html: string;
+  runId?: string;
+}): Promise<Buffer> {
+  const url = process.env.PDF_WORKER_URL?.trim();
+  const token = process.env.PDF_WORKER_TOKEN?.trim();
+  if (!url) {
+    throw new Error("PDF_WORKER_URL is not configured.");
+  }
+  if (!token) {
+    throw new Error("PDF_WORKER_TOKEN is not configured.");
   }
 
-  if (url === "about:blank") {
-    return type !== "document";
-  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WORKER_FETCH_MS);
 
-  if (url.startsWith("data:") || url.startsWith("blob:")) {
-    return false;
-  }
-
-  if (
-    /^https?:/i.test(url) ||
-    url.startsWith("//") ||
-    url.startsWith("file:") ||
-    url.startsWith("chrome://") ||
-    url.startsWith("chrome-extension:")
-  ) {
-    return true;
-  }
-
-  return true;
-}
-
-async function installRequestFilter(route: Route): Promise<void> {
-  const request = route.request();
-  if (shouldBlockRequest(request.url(), request.resourceType())) {
-    await route.abort("blockedbyclient");
-  } else {
-    await route.continue();
-  }
-}
-
-/**
- * Renders pre-sanitized HTML in Chromium and returns a PDF buffer.
- */
-export async function convertHtmlToPdf(html: string): Promise<Buffer> {
-  const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext();
-    await context.route("**/*", installRequestFilter);
-    const page = await context.newPage();
-
-    await page.setContent(html, {
-      waitUntil: "load",
-      timeout: 45_000,
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        html: args.html,
+        ...(args.runId ? { runId: args.runId } : {}),
+      }),
+      signal: controller.signal,
     });
 
-    return Buffer.from(await page.pdf(PDF_OPTIONS));
+    if (!res.ok) {
+      const snippet = (await res.text().catch(() => "")).slice(0, 400);
+      throw new Error(
+        `PDF worker HTTP ${res.status}${snippet ? `: ${snippet}` : ""}`
+      );
+    }
+
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.toLowerCase().includes("application/pdf")) {
+      throw new Error(`PDF worker returned unexpected Content-Type: ${ct}`);
+    }
+
+    const ab = await res.arrayBuffer();
+    return Buffer.from(ab);
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("PDF worker request timed out.");
+    }
+    throw e;
   } finally {
-    await browser.close();
+    clearTimeout(timer);
   }
 }

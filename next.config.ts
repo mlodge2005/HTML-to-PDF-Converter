@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
-  serverExternalPackages: ["playwright", "pg", "nodemailer"],
+  serverExternalPackages: ["pg", "nodemailer"],
 };
 
 export default nextConfig;
