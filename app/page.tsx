@@ -1,65 +1,87 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { ConvertModal } from "@/components/ConvertModal";
 
 export default function Home() {
+  const [open, setOpen] = useState(false);
+  /** Increment to remount the modal and reset its internal form state on each open. */
+  const [openRound, setOpenRound] = useState(0);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="relative min-h-dvh flex flex-col">
+      <header className="border-b border-zinc-200/80 bg-white/80 dark:border-zinc-800/80 dark:bg-zinc-950/80">
+        <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-4 sm:px-6">
+          <span className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+            HTML → PDF
+          </span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      </header>
+
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-4 py-16 sm:px-6 sm:py-20">
+        <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+          Simple, fast conversion
+        </p>
+        <h1 className="mt-2 text-4xl font-semibold tracking-tight text-balance text-zinc-900 dark:text-zinc-100 sm:text-5xl">
+          Turn HTML into a print-ready PDF
+        </h1>
+        <p className="mt-4 text-lg text-pretty text-zinc-600 dark:text-zinc-400">
+          Upload an HTML file, add your email, and we will run it through a
+          secure headless browser and email you a Letter-size PDF. Scripts and
+          live network content are not loaded for v1, so your static layouts
+          stay predictable.
+        </p>
+
+        <ul className="mt-8 space-y-3 text-zinc-700 dark:text-zinc-300">
+          <li className="flex gap-3 text-sm sm:text-base">
+            <span
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+              aria-hidden
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <span>Upload a single .html or .htm file (up to 2MB).</span>
+          </li>
+          <li className="flex gap-3 text-sm sm:text-base">
+            <span
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+              aria-hidden
+            />
+            <span>
+              We remove scripts and event handlers, then render with Chromium
+              to PDF.
+            </span>
+          </li>
+          <li className="flex gap-3 text-sm sm:text-base">
+            <span
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+              aria-hidden
+            />
+            <span>Your PDF is sent to the email you provide—nothing else required.</span>
+          </li>
+        </ul>
+
+        <div className="mt-10">
+          <button
+            type="button"
+            onClick={() => {
+              setOpenRound((n) => n + 1);
+              setOpen(true);
+            }}
+            className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-900 px-8 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
-            Documentation
-          </a>
+            Convert HTML to PDF
+          </button>
         </div>
       </main>
+
+      <footer className="border-t border-zinc-200/80 py-6 text-center text-sm text-zinc-500 dark:border-zinc-800/80">
+        <p>Built with Next.js, Playwright, Resend, and Neon.</p>
+      </footer>
+
+      <ConvertModal
+        key={openRound}
+        isOpen={open}
+        onClose={() => setOpen(false)}
+      />
     </div>
   );
 }
