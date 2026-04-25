@@ -11,8 +11,9 @@ import {
 } from "@/lib/db";
 import { safeParseConvertFields } from "@/lib/validation";
 
-export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 const VAL_ERROR = (message: string) =>
   NextResponse.json({ ok: false, error: message } as const, { status: 400 });
