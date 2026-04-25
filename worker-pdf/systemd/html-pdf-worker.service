@@ -1,0 +1,15 @@
+[Unit]
+Description=HTML PDF Worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/html-pdf-worker
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/html-pdf-worker/.env
+User=root
+
+[Install]
+WantedBy=multi-user.target
