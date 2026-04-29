@@ -11,6 +11,7 @@
     "test:pipeline": "tsx scripts/test-converter-pipeline.ts"
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
     "next": "16.2.4",
     "nodemailer": "^7.0.10",
     "pg": "^8.16.3",
@@ -23,13 +24,13 @@
     "@types/node": "^20",
     "@types/nodemailer": "^7.0.3",
     "@types/pg": "^8.16.0",
-    "dotenv": "^16.4.5",
-    "tsx": "^4.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^16.4.5",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

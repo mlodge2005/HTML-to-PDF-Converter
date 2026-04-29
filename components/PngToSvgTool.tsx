@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { jsPDF } from "jspdf";
 
 type Mode = "raster-wrap" | "simple-vector-trace";
+type Operation =
+  | "png-jpeg"
+  | "jpeg-svg"
+  | "png-pdf"
+  | "jpeg-pdf"
+  | "svg-pdf"
+  | "png-svg-raster"
+  | "png-svg-trace";
 
 type TraceOptions = {
   alphaCutoff: number;
@@ -32,6 +41,27 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result ?? ""));
     reader.readAsDataURL(file);
   });
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [head, body] = dataUrl.split(",");
+  const mimeMatch = /data:(.*?);base64/.exec(head);
+  const mime = mimeMatch?.[1] || "application/octet-stream";
+  const bytes = atob(body || "");
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function fileToImageData(file: File): Promise<{
@@ -276,6 +306,7 @@ type PngToSvgModalProps = {
 };
 
 export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
+  const [operation, setOperation] = useState<Operation>("png-jpeg");
   const [mode, setMode] = useState<Mode>("raster-wrap");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -318,13 +349,114 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
     setError("");
     setMeta("");
     try {
-      if (!file.type.includes("png") && !file.name.toLowerCase().endsWith(".png")) {
-        throw new Error("Please upload a PNG file.");
+      const name = file.name.toLowerCase();
+      const isPng = file.type.includes("png") || name.endsWith(".png");
+      const isJpeg =
+        file.type.includes("jpeg") || name.endsWith(".jpg") || name.endsWith(".jpeg");
+      const isSvg = file.type.includes("svg") || name.endsWith(".svg");
+      const baseName = file.name.replace(/\.[^/.]+$/, "");
+
+      if (
+        (operation === "png-jpeg" ||
+          operation === "png-pdf" ||
+          operation === "png-svg-raster" ||
+          operation === "png-svg-trace") &&
+        !isPng
+      ) {
+        throw new Error("Please upload a PNG file for this conversion.");
       }
-      const baseName = file.name.replace(/\.png$/i, "");
+      if ((operation === "jpeg-svg" || operation === "jpeg-pdf") && !isJpeg) {
+        throw new Error("Please upload a JPEG file for this conversion.");
+      }
+      if (operation === "svg-pdf" && !isSvg) {
+        throw new Error("Please upload an SVG file for this conversion.");
+      }
+
+      if (operation === "png-jpeg") {
+        const pngUrl = await fileToDataUrl(file);
+        const img = new Image();
+        img.src = pngUrl;
+        await img.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Canvas context unavailable.");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        const jpegUrl = canvas.toDataURL("image/jpeg", 0.92);
+        downloadBlob(`${baseName || "converted"}.jpg`, dataUrlToBlob(jpegUrl));
+        setMeta(`PNG converted to JPEG (${img.width}x${img.height}).`);
+        setSvg("");
+        return;
+      }
+
+      if (operation === "jpeg-svg") {
+        const dataUrl = await fileToDataUrl(file);
+        const img = new Image();
+        img.src = dataUrl;
+        await img.decode();
+        const out = buildRasterWrapSvg(img.width, img.height, dataUrl);
+        setSvgName(`${baseName || "converted"}.svg`);
+        setSvg(out);
+        setMeta(`JPEG wrapped as SVG (${img.width}x${img.height}).`);
+        return;
+      }
+
+      if (operation === "png-pdf" || operation === "jpeg-pdf") {
+        const dataUrl = await fileToDataUrl(file);
+        const img = new Image();
+        img.src = dataUrl;
+        await img.decode();
+        const doc = new jsPDF({
+          orientation: img.width >= img.height ? "landscape" : "portrait",
+          unit: "pt",
+          format: [img.width, img.height],
+        });
+        const fmt = operation === "png-pdf" ? "PNG" : "JPEG";
+        doc.addImage(dataUrl, fmt, 0, 0, img.width, img.height);
+        doc.save(`${baseName || "converted"}.pdf`);
+        setMeta(`${fmt} converted to PDF (${img.width}x${img.height}).`);
+        setSvg("");
+        return;
+      }
+
+      if (operation === "svg-pdf") {
+        const svgText = await file.text();
+        const svgBlob = new Blob([svgText], { type: "image/svg+xml" });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        try {
+          const img = new Image();
+          img.src = svgUrl;
+          await img.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width || 1200;
+          canvas.height = img.height || 1200;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Canvas context unavailable.");
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const pngUrl = canvas.toDataURL("image/png");
+          const doc = new jsPDF({
+            orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+            unit: "pt",
+            format: [canvas.width, canvas.height],
+          });
+          doc.addImage(pngUrl, "PNG", 0, 0, canvas.width, canvas.height);
+          doc.save(`${baseName || "converted"}.pdf`);
+          setMeta(`SVG converted to PDF (${canvas.width}x${canvas.height}).`);
+          setSvg("");
+        } finally {
+          URL.revokeObjectURL(svgUrl);
+        }
+        return;
+      }
+
       setSvgName(`${baseName || "converted"}.svg`);
       const { width, height, rgba } = await fileToImageData(file);
-      if (mode === "raster-wrap") {
+      if (operation === "png-svg-raster" || mode === "raster-wrap") {
         const dataUrl = await fileToDataUrl(file);
         const out = buildRasterWrapSvg(width, height, dataUrl);
         setSvg(out);
@@ -361,10 +493,10 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-              PNG to SVG
+              Image Conversion
             </h2>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              Raster SVG Wrap is fast and exact. Simple Vector Trace generates editable vector paths for high-contrast artwork.
+              Quick local conversions for common formats. Best results for logos, icons, flat graphics, and high-contrast images.
             </p>
           </div>
           <button
@@ -389,7 +521,34 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
           </button>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="text-sm text-zinc-700 dark:text-zinc-300">
+            Conversion
+            <select
+              value={operation}
+              onChange={(e) => {
+                const next = e.target.value as Operation;
+                setOperation(next);
+                setSvg("");
+                setMeta("");
+                setError("");
+                setMode(next === "png-svg-trace" ? "simple-vector-trace" : "raster-wrap");
+              }}
+              className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-2 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              <option value="png-jpeg">PNG → JPEG</option>
+              <option value="jpeg-svg">JPEG → SVG (raster wrap)</option>
+              <option value="png-pdf">PNG → PDF</option>
+              <option value="jpeg-pdf">JPEG → PDF</option>
+              <option value="svg-pdf">SVG → PDF</option>
+              <option value="png-svg-raster">PNG → SVG (raster wrap)</option>
+              <option value="png-svg-trace">PNG → SVG (simple vector trace)</option>
+            </select>
+          </label>
+        </div>
+
+        {(operation === "png-svg-raster" || operation === "png-svg-trace") && (
+          <div className="mt-5 flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setMode("raster-wrap")}
@@ -404,9 +563,11 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
           >
             Mode 2: Simple Vector Trace
           </button>
-        </div>
+          </div>
+        )}
 
-        {mode === "simple-vector-trace" && (
+        {(operation === "png-svg-raster" || operation === "png-svg-trace") &&
+          mode === "simple-vector-trace" && (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <label className="text-sm text-zinc-700 dark:text-zinc-300">
               Alpha cutoff
@@ -453,7 +614,13 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
         <div className="mt-5">
           <input
             type="file"
-            accept=".png,image/png"
+            accept={
+              operation === "svg-pdf"
+                ? ".svg,image/svg+xml"
+                : operation === "jpeg-svg" || operation === "jpeg-pdf"
+                  ? ".jpg,.jpeg,image/jpeg"
+                  : ".png,image/png"
+            }
             disabled={busy}
             onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
             className="block w-full cursor-pointer rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"

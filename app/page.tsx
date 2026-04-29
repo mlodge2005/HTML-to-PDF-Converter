@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ConvertModal } from "@/components/ConvertModal";
 import { PngToSvgModal } from "@/components/PngToSvgTool";
 
-type ServiceTab = "html-pdf" | "png-svg";
+type ServiceTab = "html-pdf" | "image-convert";
 
 export default function Home() {
   const [tab, setTab] = useState<ServiceTab>("html-pdf");
@@ -41,14 +41,14 @@ export default function Home() {
           </button>
           <button
             type="button"
-            onClick={() => setTab("png-svg")}
+            onClick={() => setTab("image-convert")}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
               !isHtml
                 ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-900 dark:text-zinc-100"
                 : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
             }`}
           >
-            PNG → SVG
+            Image Convert
           </button>
         </div>
         <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
@@ -57,12 +57,12 @@ export default function Home() {
         <h1 className="mt-2 text-4xl font-semibold tracking-tight text-balance text-zinc-900 dark:text-zinc-100 sm:text-5xl">
           {isHtml
             ? "Turn HTML into a print-ready PDF"
-            : "Convert PNG into usable SVG files"}
+            : "Convert PNG, JPEG, and SVG formats quickly"}
         </h1>
         <p className="mt-4 text-lg text-pretty text-zinc-600 dark:text-zinc-400">
           {isHtml
             ? "Upload an HTML file, add your email, and we will run it through a secure headless browser and email you a Letter-size PDF. Scripts and live network content are not loaded for v1, so your static layouts stay predictable."
-            : "Choose between a fast raster SVG wrapper and a simple vector tracing mode. This is best for logos, icons, flat graphics, and high-contrast images."}
+            : "Run quick client-side image conversions: PNG to JPEG, JPEG to SVG, PNG/JPEG to PDF, and SVG to PDF, plus PNG SVG wrap/trace options."}
         </p>
 
         <ul className="mt-8 space-y-3 text-zinc-700 dark:text-zinc-300">
@@ -100,21 +100,21 @@ export default function Home() {
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
                   aria-hidden
                 />
-                <span>Mode 1 wraps your PNG in SVG with exact pixel fidelity.</span>
+                <span>Convert PNG to JPEG and PNG/JPEG to PDF in one click.</span>
               </li>
               <li className="flex gap-3 text-sm sm:text-base">
                 <span
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
                   aria-hidden
                 />
-                <span>Mode 2 performs lightweight color-region tracing into SVG paths.</span>
+                <span>Convert JPEG to SVG and SVG to PDF from the same modal.</span>
               </li>
               <li className="flex gap-3 text-sm sm:text-base">
                 <span
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
                   aria-hidden
                 />
-                <span>Export as downloadable SVG and copy raw markup.</span>
+                <span>Includes optional PNG raster-wrap and simple vector-trace SVG tools.</span>
               </li>
             </>
           )}
@@ -134,7 +134,7 @@ export default function Home() {
             }}
             className="inline-flex h-12 items-center justify-center rounded-xl bg-zinc-900 px-8 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
-            {isHtml ? "Convert HTML to PDF" : "Convert PNG to SVG"}
+            {isHtml ? "Convert HTML to PDF" : "Open Image Converter"}
           </button>
         </div>
       </main>
