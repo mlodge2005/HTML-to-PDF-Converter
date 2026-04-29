@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ConvertModal } from "@/components/ConvertModal";
+import { PngToSvgTool } from "@/components/PngToSvgTool";
 
 export default function Home() {
   const [open, setOpen] = useState(false);
@@ -82,6 +83,7 @@ export default function Home() {
         isOpen={open}
         onClose={() => setOpen(false)}
       />
+      <PngToSvgTool />
     </div>
   );
 }
