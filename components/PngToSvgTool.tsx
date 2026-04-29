@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Mode = "raster-wrap" | "simple-vector-trace";
 
@@ -270,7 +270,12 @@ function downloadTextFile(filename: string, content: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function PngToSvgTool() {
+type PngToSvgModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+};
+
+export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
   const [mode, setMode] = useState<Mode>("raster-wrap");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -288,6 +293,24 @@ export function PngToSvgTool() {
     const b = new Blob([svg], { type: "image/svg+xml" });
     return URL.createObjectURL(b);
   }, [svg]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isOpen, onClose]);
+
+  const onBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
 
   const onFile = async (file: File | null) => {
     if (!file) return;
@@ -321,15 +344,50 @@ export function PngToSvgTool() {
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <section className="mx-auto w-full max-w-4xl px-4 pb-20 sm:px-6">
-      <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          PNG to SVG (2 modes)
-        </h2>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Raster SVG Wrap is fast and exact. Simple Vector Trace generates editable vector paths for high-contrast artwork.
-        </p>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/60 p-4 backdrop-blur-sm sm:items-center"
+      role="presentation"
+      onMouseDown={onBackdrop}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-3xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl shadow-zinc-900/20 dark:border-zinc-700 dark:bg-zinc-900"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+              PNG to SVG
+            </h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              Raster SVG Wrap is fast and exact. Simple Vector Trace generates editable vector paths for high-contrast artwork.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            aria-label="Close"
+          >
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
           <button
@@ -436,6 +494,6 @@ export function PngToSvgTool() {
           </div>
         )}
       </div>
-    </section>
+    </div>
   );
 }
