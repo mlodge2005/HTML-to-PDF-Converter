@@ -11,6 +11,8 @@
     "test:pipeline": "tsx scripts/test-converter-pipeline.ts"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "jspdf": "^4.2.1",
     "next": "16.2.4",
     "nodemailer": "^7.0.10",

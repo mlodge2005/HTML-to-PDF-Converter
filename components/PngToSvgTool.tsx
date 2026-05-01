@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { jsPDF } from "jspdf";
+import { convertMp4ToGifBlob } from "@/lib/media/mp4ToGif";
+import { convertSvgToGifBlob, convertSvgToMp4Blob } from "@/lib/media/svgToVideo";
 
 type Mode = "raster-wrap" | "simple-vector-trace";
 type Operation =
@@ -10,8 +12,11 @@ type Operation =
   | "png-pdf"
   | "jpeg-pdf"
   | "svg-pdf"
+  | "svg-gif"
+  | "svg-mp4"
   | "png-svg-raster"
-  | "png-svg-trace";
+  | "png-svg-trace"
+  | "mp4-gif";
 
 type TraceOptions = {
   alphaCutoff: number;
@@ -318,6 +323,11 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
     whiteCutoff: 245,
     quantStep: 32,
   });
+  const [gifMaxSeconds, setGifMaxSeconds] = useState(20);
+  const [gifFps, setGifFps] = useState(12);
+  const [gifMaxWidth, setGifMaxWidth] = useState(480);
+  const [svgMp4Seconds, setSvgMp4Seconds] = useState(6);
+  const [busyDetail, setBusyDetail] = useState("");
 
   const previewUrl = useMemo(() => {
     if (!svg) return "";
@@ -348,12 +358,15 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
     setBusy(true);
     setError("");
     setMeta("");
+    setBusyDetail("");
     try {
       const name = file.name.toLowerCase();
       const isPng = file.type.includes("png") || name.endsWith(".png");
       const isJpeg =
         file.type.includes("jpeg") || name.endsWith(".jpg") || name.endsWith(".jpeg");
       const isSvg = file.type.includes("svg") || name.endsWith(".svg");
+      const isMp4 =
+        file.type.includes("mp4") || name.endsWith(".mp4") || name.endsWith(".m4v");
       const baseName = file.name.replace(/\.[^/.]+$/, "");
 
       if (
@@ -368,8 +381,69 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
       if ((operation === "jpeg-svg" || operation === "jpeg-pdf") && !isJpeg) {
         throw new Error("Please upload a JPEG file for this conversion.");
       }
-      if (operation === "svg-pdf" && !isSvg) {
+      if (
+        (operation === "svg-pdf" || operation === "svg-gif" || operation === "svg-mp4") &&
+        !isSvg
+      ) {
         throw new Error("Please upload an SVG file for this conversion.");
+      }
+      if (operation === "mp4-gif" && !isMp4) {
+        throw new Error("Please upload an MP4 (or M4V) file for this conversion.");
+      }
+
+      if (operation === "mp4-gif") {
+        const maxBytes = 120 * 1024 * 1024;
+        if (file.size > maxBytes) {
+          throw new Error("MP4 must be 120MB or smaller for in-browser conversion.");
+        }
+        const maxSec = Math.min(120, Math.max(1, Math.round(gifMaxSeconds)));
+        const fps = Math.min(30, Math.max(1, Math.round(gifFps)));
+        const w = Math.min(1280, Math.max(80, Math.round(gifMaxWidth)));
+        setBusyDetail("Loading FFmpeg (first open may download ~30MB)…");
+        const blob = await convertMp4ToGifBlob(file, {
+          maxSeconds: maxSec,
+          fps,
+          maxWidth: w,
+        }, {
+          onStatus: (msg) => setBusyDetail(msg),
+          onProgress: (ratio) =>
+            setBusyDetail(`Encoding GIF… ${Math.round(ratio * 100)}%`),
+        });
+        downloadBlob(`${baseName || "clip"}.gif`, blob);
+        setSvg("");
+        setMeta(
+          `GIF saved (first ${maxSec}s, ${fps} fps, max width ${w}px). Longer videos use more memory—trim in an editor if needed.`
+        );
+        return;
+      }
+
+      if (operation === "svg-gif") {
+        const w = Math.min(1280, Math.max(80, Math.round(gifMaxWidth)));
+        setBusyDetail("Loading FFmpeg (first open may download ~30MB)…");
+        const { blob, width, height } = await convertSvgToGifBlob(
+          file,
+          { maxWidth: w },
+          { onStatus: (msg) => setBusyDetail(msg) }
+        );
+        downloadBlob(`${baseName || "graphic"}.gif`, blob);
+        setSvg("");
+        setMeta(`SVG converted to GIF (${width}x${height}).`);
+        return;
+      }
+
+      if (operation === "svg-mp4") {
+        const w = Math.min(1280, Math.max(80, Math.round(gifMaxWidth)));
+        const seconds = Math.min(120, Math.max(1, Math.round(svgMp4Seconds)));
+        setBusyDetail("Loading FFmpeg (first open may download ~30MB)…");
+        const { blob, width, height } = await convertSvgToMp4Blob(
+          file,
+          { maxWidth: w, seconds },
+          { onStatus: (msg) => setBusyDetail(msg) }
+        );
+        downloadBlob(`${baseName || "graphic"}.mp4`, blob);
+        setSvg("");
+        setMeta(`SVG converted to MP4 (${width}x${height}, ${seconds}s).`);
+        return;
       }
 
       if (operation === "png-jpeg") {
@@ -470,7 +544,7 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
         );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed converting PNG.");
+      setError(e instanceof Error ? e.message : "Conversion failed.");
     } finally {
       setBusy(false);
     }
@@ -496,7 +570,7 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
               Image Conversion
             </h2>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              Quick local conversions for common formats. Best results for logos, icons, flat graphics, and high-contrast images.
+              Quick local conversions for common formats. MP4→GIF runs in your browser with FFmpeg (first use downloads the encoder). Raster/SVG tools work best for logos, icons, flat graphics, and high-contrast images.
             </p>
           </div>
           <button
@@ -541,11 +615,78 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
               <option value="png-pdf">PNG → PDF</option>
               <option value="jpeg-pdf">JPEG → PDF</option>
               <option value="svg-pdf">SVG → PDF</option>
+              <option value="svg-gif">SVG → GIF</option>
+              <option value="svg-mp4">SVG → MP4</option>
               <option value="png-svg-raster">PNG → SVG (raster wrap)</option>
               <option value="png-svg-trace">PNG → SVG (simple vector trace)</option>
+              <option value="mp4-gif">MP4 → GIF</option>
             </select>
           </label>
         </div>
+
+        {(operation === "mp4-gif" || operation === "svg-gif" || operation === "svg-mp4") && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {operation === "mp4-gif" && (
+              <>
+                <label className="text-sm text-zinc-700 dark:text-zinc-300">
+                  Max length (sec)
+                  <input
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={gifMaxSeconds}
+                    onChange={(e) =>
+                      setGifMaxSeconds(Math.min(120, Math.max(1, Number(e.target.value) || 1)))
+                    }
+                    className="mt-1 w-full rounded-md border border-zinc-200 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                </label>
+                <label className="text-sm text-zinc-700 dark:text-zinc-300">
+                  FPS
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={gifFps}
+                    onChange={(e) =>
+                      setGifFps(Math.min(30, Math.max(1, Number(e.target.value) || 1)))
+                    }
+                    className="mt-1 w-full rounded-md border border-zinc-200 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                </label>
+              </>
+            )}
+            <label className="text-sm text-zinc-700 dark:text-zinc-300">
+              Max width (px)
+              <input
+                type="number"
+                min={80}
+                max={1280}
+                step={10}
+                value={gifMaxWidth}
+                onChange={(e) =>
+                  setGifMaxWidth(Math.min(1280, Math.max(80, Number(e.target.value) || 80)))
+                }
+                className="mt-1 w-full rounded-md border border-zinc-200 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            {operation === "svg-mp4" && (
+              <label className="text-sm text-zinc-700 dark:text-zinc-300">
+                Duration (sec)
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={svgMp4Seconds}
+                  onChange={(e) =>
+                    setSvgMp4Seconds(Math.min(120, Math.max(1, Number(e.target.value) || 1)))
+                  }
+                  className="mt-1 w-full rounded-md border border-zinc-200 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+                />
+              </label>
+            )}
+          </div>
+        )}
 
         {(operation === "png-svg-raster" || operation === "png-svg-trace") && (
           <div className="mt-5 flex flex-wrap gap-2">
@@ -615,11 +756,13 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
           <input
             type="file"
             accept={
-              operation === "svg-pdf"
-                ? ".svg,image/svg+xml"
-                : operation === "jpeg-svg" || operation === "jpeg-pdf"
-                  ? ".jpg,.jpeg,image/jpeg"
-                  : ".png,image/png"
+              operation === "mp4-gif"
+                ? ".mp4,.m4v,video/mp4"
+                : operation === "svg-pdf" || operation === "svg-gif" || operation === "svg-mp4"
+                  ? ".svg,image/svg+xml"
+                  : operation === "jpeg-svg" || operation === "jpeg-pdf"
+                    ? ".jpg,.jpeg,image/jpeg"
+                    : ".png,image/png"
             }
             disabled={busy}
             onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
@@ -627,7 +770,11 @@ export function PngToSvgModal({ isOpen, onClose }: PngToSvgModalProps) {
           />
         </div>
 
-        {busy && <p className="mt-3 text-sm text-zinc-500">Processing image...</p>}
+        {busy && (
+          <p className="mt-3 text-sm text-zinc-500">
+            {busyDetail || "Processing…"}
+          </p>
+        )}
         {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
         {meta && <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">{meta}</p>}
 

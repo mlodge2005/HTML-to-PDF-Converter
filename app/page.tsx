@@ -57,12 +57,12 @@ export default function Home() {
         <h1 className="mt-2 text-4xl font-semibold tracking-tight text-balance text-zinc-900 dark:text-zinc-100 sm:text-5xl">
           {isHtml
             ? "Turn HTML into a print-ready PDF"
-            : "Convert PNG, JPEG, and SVG formats quickly"}
+            : "Convert PNG, JPEG, SVG, and MP4 formats quickly"}
         </h1>
         <p className="mt-4 text-lg text-pretty text-zinc-600 dark:text-zinc-400">
           {isHtml
             ? "Upload an HTML file, add your email, and we will run it through a secure headless browser and email you a Letter-size PDF. Scripts and live network content are not loaded for v1, so your static layouts stay predictable."
-            : "Run quick client-side image conversions: PNG to JPEG, JPEG to SVG, PNG/JPEG to PDF, and SVG to PDF, plus PNG SVG wrap/trace options."}
+            : "Run quick client-side conversions: PNG to JPEG, JPEG to SVG, PNG/JPEG to PDF, SVG to PDF/GIF/MP4, MP4 to GIF (browser FFmpeg), plus PNG SVG wrap/trace options."}
         </p>
 
         <ul className="mt-8 space-y-3 text-zinc-700 dark:text-zinc-300">
@@ -108,6 +108,15 @@ export default function Home() {
                   aria-hidden
                 />
                 <span>Convert JPEG to SVG and SVG to PDF from the same modal.</span>
+              </li>
+              <li className="flex gap-3 text-sm sm:text-base">
+                <span
+                  className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+                  aria-hidden
+                />
+                <span>
+                  Turn MP4 clips into GIFs locally and export SVGs to GIF/MP4 with size controls.
+                </span>
               </li>
               <li className="flex gap-3 text-sm sm:text-base">
                 <span
