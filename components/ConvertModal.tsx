@@ -16,7 +16,8 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 
 export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
   const titleId = useId();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const htmlInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState("");
   const [state, setState] = useState<ModalState>("idle");
   const [message, setMessage] = useState("");
@@ -39,13 +40,14 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
     e.preventDefault();
     setFieldErrors({});
 
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
+    const htmlFile = htmlInputRef.current?.files?.[0];
+    const assetZip = zipInputRef.current?.files?.[0];
+    if (!htmlFile) {
       setState("error");
       setMessage("Please choose an HTML file.");
       return;
     }
-    const fileText = await file.text().catch(() => "");
+    const fileText = await htmlFile.text().catch(() => "");
     if (!fileText.trim()) {
       setState("error");
       setMessage("Missing input. Provide html/content or url.");
@@ -57,7 +59,10 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
 
     const formData = new FormData();
     formData.set("email", email.trim());
-    formData.set("file", file, file.name);
+    formData.set("htmlFile", htmlFile, htmlFile.name);
+    if (assetZip) {
+      formData.set("assetZip", assetZip, assetZip.name);
+    }
 
     try {
       const res = await fetch("/api/convert", { method: "POST", body: formData });
@@ -123,7 +128,8 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
   const fileError =
     fieldErrors?.filename?.[0] ||
     fieldErrors?.fileSizeBytes?.[0] ||
-    fieldErrors?.file?.[0];
+    fieldErrors?.file?.[0] ||
+    fieldErrors?.htmlFile?.[0];
   const emailError = fieldErrors?.email?.[0];
 
   return (
@@ -148,7 +154,7 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
               Convert to PDF
             </h2>
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              Upload an HTML file and we will email you the generated PDF.
+              Upload an HTML file and optional asset ZIP, and we will render your PDF.
             </p>
           </div>
           <button
@@ -199,9 +205,9 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
                 HTML file
               </label>
               <input
-                ref={fileInputRef}
+                ref={htmlInputRef}
                 id="html-file"
-                name="file"
+                name="htmlFile"
                 type="file"
                 accept=".html,.htm,text/html"
                 disabled={state === "loading"}
@@ -212,6 +218,27 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
                   {fileError}
                 </p>
               )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="asset-zip"
+                className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              >
+                Asset ZIP (optional)
+              </label>
+              <input
+                ref={zipInputRef}
+                id="asset-zip"
+                name="assetZip"
+                type="file"
+                accept=".zip,application/zip"
+                disabled={state === "loading"}
+                className="block w-full cursor-pointer rounded-lg border border-zinc-200 bg-zinc-50/80 px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-zinc-200 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950/50 file:dark:bg-zinc-700 file:dark:text-zinc-100"
+              />
+              <p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                Use this if your HTML references local paths like image.jpg or assets/chart.png.
+              </p>
             </div>
 
             <div>

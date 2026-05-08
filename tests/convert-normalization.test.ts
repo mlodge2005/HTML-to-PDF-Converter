@@ -43,7 +43,7 @@ test("normalizeJsonPayload rejects url-only requests", () => {
 test("normalizeMultipartFormData returns canonical html from file", async () => {
   const fd = new FormData();
   fd.set("email", "user@example.com");
-  fd.set("file", new File(["<html><body>ok</body></html>"], "sample.html"));
+  fd.set("htmlFile", new File(["<html><body>ok</body></html>"], "sample.html"));
 
   const result = await normalizeMultipartFormData(fd);
   assert.equal(result.ok, true);

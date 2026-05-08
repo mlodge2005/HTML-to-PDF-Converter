@@ -130,7 +130,7 @@ export async function normalizeMultipartFormData(
   formData: FormData
 ): Promise<NormalizeResult> {
   const bodyKeys = Array.from(formData.keys());
-  const file = formData.get("file");
+  const file = formData.get("htmlFile");
   if (!file || !(file instanceof File)) {
     return {
       ok: false,

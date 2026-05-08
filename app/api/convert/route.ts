@@ -8,13 +8,14 @@ import {
   normalizeMultipartFormData,
 } from "@/lib/convert/normalizeConvertInput";
 import { sendPdfEmail, resolvePdfFilename } from "@/lib/email/sendPdfEmail";
+import { inlineHtmlAssetsFromZip } from "@/lib/convert/resolveHtmlAssets";
 import { sanitizeHtml } from "@/lib/html/sanitizeHtml";
 import {
   createConversionRun,
   markConversionCompleted,
   markConversionFailed,
 } from "@/lib/db";
-import { safeParseConvertFields } from "@/lib/validation";
+import { MAX_FILE_BYTES, convertEmailFieldSchema, safeParseConvertFields } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,6 +32,8 @@ const ERR_500 = () =>
     { ok: false, error: "Conversion failed. Please try again." } as const,
     { status: 500 }
   );
+
+const MAX_ASSET_ZIP_BYTES = 10 * 1024 * 1024;
 
 function firstValidationError(
   fe: Record<string, string[] | undefined> | undefined
@@ -51,6 +54,15 @@ function fileExtensionFromName(name: string): string {
     return ".htm";
   }
   return "";
+}
+
+function hasHtmlExt(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.endsWith(".html") || n.endsWith(".htm");
+}
+
+function hasZipExt(name: string): boolean {
+  return name.toLowerCase().endsWith(".zip");
 }
 
 function getErrCode(e: unknown): string | undefined {
@@ -199,7 +211,8 @@ export async function POST(request: Request) {
   }
 
   const email = formData.get("email");
-  const file = formData.get("file");
+  const htmlFile = formData.get("htmlFile");
+  const assetZip = formData.get("assetZip");
   const bodyKeys = Array.from(formData.keys());
   const normalized = await normalizeMultipartFormData(formData);
   console.info("api/convert request", {
@@ -212,49 +225,63 @@ export async function POST(request: Request) {
     workerAttempted: false,
   });
 
-  if (typeof email !== "string" || !email.trim()) {
-    return VAL_ERROR("A valid email address is required.");
-  }
-  if (!file || !(file instanceof File)) {
+  if (!htmlFile || !(htmlFile instanceof File)) {
     return VAL_ERROR("Please upload an HTML file.");
   }
+  if (!hasHtmlExt(htmlFile.name)) {
+    return VAL_ERROR("HTML file must be a .html or .htm file.");
+  }
+  if (htmlFile.size > MAX_FILE_BYTES) {
+    return NextResponse.json(
+      { ok: false, error: `HTML file must be at most ${MAX_FILE_BYTES / 1024 / 1024}MB.` },
+      { status: 413 }
+    );
+  }
+  if (assetZip != null && !(assetZip instanceof File)) {
+    return VAL_ERROR("Asset ZIP upload is invalid.");
+  }
+  if (assetZip instanceof File) {
+    if (!hasZipExt(assetZip.name)) {
+      return VAL_ERROR("Asset ZIP must be a .zip file.");
+    }
+    if (assetZip.size > MAX_ASSET_ZIP_BYTES) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Asset ZIP must be at most ${MAX_ASSET_ZIP_BYTES / 1024 / 1024}MB.`,
+        },
+        { status: 413 }
+      );
+    }
+  }
+  const emailValue =
+    typeof email === "string" && email.trim().length > 0 ? email.trim() : null;
+  if (emailValue) {
+    const parsedEmail = convertEmailFieldSchema.safeParse(emailValue);
+    if (!parsedEmail.success) {
+      return VAL_ERROR("A valid email address is required.");
+    }
+  }
 
-  if (
-    !process.env.ZOHO_SMTP_USER?.trim() ||
-    !process.env.ZOHO_SMTP_APP_PASSWORD ||
-    !process.env.FROM_EMAIL?.trim()
-  ) {
-    console.error("Zoho SMTP or FROM_EMAIL is not configured.");
-    return ERR_500();
-  }
-  if (
-    !process.env.PDF_WORKER_URL?.trim() ||
-    !process.env.PDF_WORKER_TOKEN?.trim()
-  ) {
-    console.error("PDF_WORKER_URL or PDF_WORKER_TOKEN is not configured.");
-    return ERR_500();
-  }
-  if (!process.env.ZOHO_SMTP_HOST) {
-    process.env.ZOHO_SMTP_HOST = "smtp.zoho.com";
-  }
-  if (!process.env.ZOHO_SMTP_PORT) {
-    process.env.ZOHO_SMTP_PORT = "465";
-  }
-
+  const shouldEmail = Boolean(emailValue);
   const parsed = safeParseConvertFields({
-    email,
-    filename: file.name,
-    fileSizeBytes: file.size,
+    email: emailValue ?? process.env.FROM_EMAIL ?? "noreply@example.com",
+    filename: htmlFile.name,
+    fileSizeBytes: htmlFile.size,
   });
   if (!parsed.success) {
-    return VAL_ERROR(firstValidationError(parsed.fieldErrors));
+    if (shouldEmail) {
+      return VAL_ERROR(firstValidationError(parsed.fieldErrors));
+    }
   }
 
-  const { email: cleanEmail, filename, fileSizeBytes } = parsed.data;
+  const filename = htmlFile.name;
+  const fileSizeBytes = htmlFile.size;
+  const cleanEmail = emailValue;
 
   let ab: ArrayBuffer;
   try {
-    ab = await file.arrayBuffer();
+    ab = await htmlFile.arrayBuffer();
   } catch (e) {
     console.error("Failed to read upload:", e);
     return VAL_ERROR("We could not read the uploaded file.");
@@ -273,13 +300,46 @@ export async function POST(request: Request) {
 
   const buf = Buffer.from(ab);
   const originalFileSha256 = createHash("sha256").update(buf).digest("hex");
-  const html = normalized.html;
+  let html = normalized.html;
+  if (assetZip instanceof File) {
+    try {
+      const zipAb = await assetZip.arrayBuffer();
+      const zipBuf = Buffer.from(zipAb);
+      const resolved = await inlineHtmlAssetsFromZip({
+        html,
+        zipBuffer: zipBuf,
+      });
+      if (resolved.missingPaths.length > 0) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Missing asset files",
+            details:
+              "Some relative asset paths referenced by HTML were not found in the ZIP.",
+            missingPaths: resolved.missingPaths,
+          },
+          { status: 400 }
+        );
+      }
+      html = resolved.html;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid asset ZIP",
+          details: message,
+        },
+        { status: 400 }
+      );
+    }
+  }
   const ext = fileExtensionFromName(filename);
   const outputFilename = resolvePdfFilename(filename);
 
   const hasDb = Boolean(process.env.DATABASE_URL?.trim());
   let runId: string | null = null;
-  if (hasDb) {
+  if (hasDb && cleanEmail) {
     try {
       runId = await createConversionRun({
         recipientEmail: cleanEmail,
@@ -298,6 +358,29 @@ export async function POST(request: Request) {
 
   const tPipeline0 = performance.now();
   try {
+    if (
+      !process.env.PDF_WORKER_URL?.trim() ||
+      !process.env.PDF_WORKER_TOKEN?.trim()
+    ) {
+      console.error("PDF_WORKER_URL or PDF_WORKER_TOKEN is not configured.");
+      return ERR_500();
+    }
+    if (
+      shouldEmail &&
+      (!process.env.ZOHO_SMTP_USER?.trim() ||
+        !process.env.ZOHO_SMTP_APP_PASSWORD ||
+        !process.env.FROM_EMAIL?.trim())
+    ) {
+      console.error("Zoho SMTP or FROM_EMAIL is not configured.");
+      return ERR_500();
+    }
+    if (!process.env.ZOHO_SMTP_HOST) {
+      process.env.ZOHO_SMTP_HOST = "smtp.zoho.com";
+    }
+    if (!process.env.ZOHO_SMTP_PORT) {
+      process.env.ZOHO_SMTP_PORT = "465";
+    }
+
     const t0 = performance.now();
     console.info("api/convert worker attempt", {
       mode: "multipart",
@@ -316,13 +399,17 @@ export async function POST(request: Request) {
     const renderDurationMs = Math.round(t1 - t0);
 
     const t2 = performance.now();
-    await sendPdfEmail({
-      to: cleanEmail,
-      pdfBuffer: pdf,
-      originalFilename: filename,
-    });
+    let emailDurationMs = 0;
+    if (cleanEmail) {
+      await sendPdfEmail({
+        to: cleanEmail,
+        pdfBuffer: pdf,
+        originalFilename: filename,
+      });
+      const t3 = performance.now();
+      emailDurationMs = Math.round(t3 - t2);
+    }
     const t3 = performance.now();
-    const emailDurationMs = Math.round(t3 - t2);
     const totalDurationMs = Math.round(t3 - tPipeline0);
 
     if (runId) {
@@ -339,7 +426,15 @@ export async function POST(request: Request) {
       }
     }
 
-    return OK_JSON("PDF converted and emailed successfully.");
+    if (cleanEmail) {
+      return OK_JSON("PDF converted and emailed successfully.");
+    }
+    return new NextResponse(new Uint8Array(pdf), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+      },
+    });
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error("POST /api/convert failed:", e);

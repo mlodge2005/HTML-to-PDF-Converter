@@ -82,6 +82,67 @@ test("multipart invalid request returns 400", async () => {
   assert.equal(body.error, "Please upload an HTML file.");
 });
 
+test("multipart rejects non-zip asset upload", async () => {
+  const fd = new FormData();
+  fd.set("htmlFile", new File(["<html><body>ok</body></html>"], "index.html"));
+  fd.set("assetZip", new File(["not zip"], "assets.txt"));
+  const req = new Request("http://localhost/api/convert", {
+    method: "POST",
+    body: fd,
+  });
+  const res = await POST(req);
+  const body = await res.json();
+  assert.equal(res.status, 400);
+  assert.equal(body.error, "Asset ZIP must be a .zip file.");
+});
+
+test("multipart returns missing relative assets when not in zip", async () => {
+  const AdmZip = (await import("adm-zip")).default;
+  const zip = new AdmZip();
+  zip.addFile("other.png", Buffer.from("img"));
+  const fd = new FormData();
+  fd.set(
+    "htmlFile",
+    new File(
+      ['<html><body><img src="assets/chart.png" /></body></html>'],
+      "index.html"
+    )
+  );
+  fd.set("assetZip", new File([zip.toBuffer()], "assets.zip"));
+  const req = new Request("http://localhost/api/convert", {
+    method: "POST",
+    body: fd,
+  });
+  const res = await POST(req);
+  const body = await res.json();
+  assert.equal(res.status, 400);
+  assert.equal(body.error, "Missing asset files");
+  assert.deepEqual(body.missingPaths, ["assets/chart.png"]);
+});
+
+test("multipart success returns binary PDF when email is omitted", async () => {
+  setWorkerEnv();
+  global.fetch = async () =>
+    new Response(new Uint8Array([4, 5, 6]), {
+      status: 200,
+      headers: { "content-type": "application/pdf" },
+    });
+  const fd = new FormData();
+  fd.set(
+    "htmlFile",
+    new File(["<html><body><h1>Multipart</h1></body></html>"], "index.html")
+  );
+  const req = new Request("http://localhost/api/convert", {
+    method: "POST",
+    body: fd,
+  });
+  const res = await POST(req);
+  const body = await res.arrayBuffer();
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/pdf");
+  assert.equal(body.byteLength, 3);
+});
+
 test("json html success returns binary PDF", async () => {
   setWorkerEnv();
   global.fetch = async () =>

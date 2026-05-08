@@ -73,7 +73,7 @@ export default function Home() {
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
                   aria-hidden
                 />
-                <span>Upload a single .html or .htm file (up to 2MB).</span>
+                <span>Upload your HTML file.</span>
               </li>
               <li className="flex gap-3 text-sm sm:text-base">
                 <span
@@ -81,8 +81,8 @@ export default function Home() {
                   aria-hidden
                 />
                 <span>
-                  We remove scripts and event handlers, then render with Chromium
-                  to PDF.
+                  If your HTML references local images like <code>image.jpg</code> or{" "}
+                  <code>assets/chart.png</code>, upload a ZIP containing those files.
                 </span>
               </li>
               <li className="flex gap-3 text-sm sm:text-base">
@@ -90,7 +90,14 @@ export default function Home() {
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
                   aria-hidden
                 />
-                <span>Your PDF is sent to the email you provide—nothing else required.</span>
+                <span>Keep the same folder structure inside the ZIP as the HTML references.</span>
+              </li>
+              <li className="flex gap-3 text-sm sm:text-base">
+                <span
+                  className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"
+                  aria-hidden
+                />
+                <span>Base64 images and public image URLs work without a ZIP.</span>
               </li>
             </>
           ) : (
