@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { NextResponse } from "next/server";
-import { convertHtmlToPdf } from "@/lib/pdf/convertHtmlToPdf";
+import { convertHtmlToPdf, PdfWorkerError } from "@/lib/pdf/convertHtmlToPdf";
+import {
+  detectRequestMode,
+  normalizeJsonPayload,
+  normalizeMultipartFormData,
+} from "@/lib/convert/normalizeConvertInput";
 import { sendPdfEmail, resolvePdfFilename } from "@/lib/email/sendPdfEmail";
 import { sanitizeHtml } from "@/lib/html/sanitizeHtml";
 import {
@@ -55,7 +60,136 @@ function getErrCode(e: unknown): string | undefined {
   return undefined;
 }
 
+function workerFailedResponse(err: unknown) {
+  if (err instanceof PdfWorkerError) {
+    return NextResponse.json(
+      {
+        error: "PDF worker failed",
+        status: err.status ?? 502,
+        details: err.details ?? err.message,
+      },
+      { status: 502 }
+    );
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return NextResponse.json(
+    {
+      error: "PDF worker failed",
+      status: 502,
+      details: message,
+    },
+    { status: 502 }
+  );
+}
+
+async function handleJsonConvert(request: Request, contentType: string) {
+  let payload: Record<string, unknown>;
+  try {
+    const body = await request.json();
+    payload =
+      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  } catch (e) {
+    console.error("api/convert invalid JSON body", e);
+    return NextResponse.json(
+      {
+        error: "Malformed JSON",
+        expected: "Valid JSON body with html/content",
+      },
+      { status: 400 }
+    );
+  }
+
+  const normalized = normalizeJsonPayload(payload);
+  const workerConfigured = Boolean(
+    process.env.PDF_WORKER_URL?.trim() && process.env.PDF_WORKER_TOKEN?.trim()
+  );
+
+  console.info("api/convert request", {
+    mode: "json",
+    contentType,
+    normalizedInputType: normalized.ok ? normalized.normalizedInputType : "none",
+    htmlLength: normalized.ok ? normalized.htmlLength : 0,
+    workerConfigured,
+    workerAttempted: false,
+    bodyKeys: normalized.ok ? normalized.bodyKeys : normalized.receivedKeys,
+  });
+
+  if (!normalized.ok) {
+    return NextResponse.json(
+      {
+        error: normalized.error,
+        expected: "Provide html/content or url",
+        details: normalized.details,
+        receivedKeys: normalized.receivedKeys,
+      },
+      { status: normalized.status }
+    );
+  }
+  const sanitized = sanitizeHtml(normalized.html);
+
+  try {
+    console.info("api/convert worker attempt", {
+      mode: "json",
+      contentType,
+      normalizedInputType: normalized.normalizedInputType,
+      htmlLength: sanitized.length,
+      workerConfigured,
+      workerAttempted: true,
+    });
+    const pdf = await convertHtmlToPdf({ html: sanitized, runId: normalized.runId });
+    console.info("api/convert worker status", {
+      mode: "json",
+      status: 200,
+      pdfBytes: pdf.length,
+    });
+    return new NextResponse(new Uint8Array(pdf), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+      },
+    });
+  } catch (e) {
+    const workerStatus = e instanceof PdfWorkerError ? e.status : undefined;
+    console.error("api/convert worker status", {
+      status: workerStatus ?? 502,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return workerFailedResponse(e);
+  }
+}
+
 export async function POST(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+  const mode = detectRequestMode(contentType);
+  const workerConfigured = Boolean(
+    process.env.PDF_WORKER_URL?.trim() && process.env.PDF_WORKER_TOKEN?.trim()
+  );
+
+  if (mode === "json") {
+    return handleJsonConvert(request, contentType);
+  }
+
+  if (mode === "unsupported") {
+    console.info("api/convert request", {
+      mode: "unsupported_content_type",
+      contentType,
+      normalizedInputType: "none",
+      htmlLength: 0,
+      workerConfigured,
+      workerAttempted: false,
+      bodyKeys: [],
+    });
+    return NextResponse.json(
+      {
+        error: "Unsupported content-type",
+        expected: "multipart/form-data or application/json",
+        receivedContentType: contentType || null,
+        receivedKeys: [],
+      },
+      { status: 415 }
+    );
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -66,6 +200,17 @@ export async function POST(request: Request) {
 
   const email = formData.get("email");
   const file = formData.get("file");
+  const bodyKeys = Array.from(formData.keys());
+  const normalized = await normalizeMultipartFormData(formData);
+  console.info("api/convert request", {
+    mode: "multipart",
+    contentType,
+    bodyKeys,
+    normalizedInputType: normalized.ok ? normalized.normalizedInputType : "none",
+    htmlLength: normalized.ok ? normalized.htmlLength : 0,
+    workerConfigured,
+    workerAttempted: false,
+  });
 
   if (typeof email !== "string" || !email.trim()) {
     return VAL_ERROR("A valid email address is required.");
@@ -114,9 +259,21 @@ export async function POST(request: Request) {
     console.error("Failed to read upload:", e);
     return VAL_ERROR("We could not read the uploaded file.");
   }
+  if (!normalized.ok) {
+    return NextResponse.json(
+      {
+        error: normalized.error,
+        expected: "Provide html/content or url",
+        details: normalized.details,
+        receivedKeys: normalized.receivedKeys,
+      },
+      { status: normalized.status }
+    );
+  }
+
   const buf = Buffer.from(ab);
   const originalFileSha256 = createHash("sha256").update(buf).digest("hex");
-  const html = buf.toString("utf8");
+  const html = normalized.html;
   const ext = fileExtensionFromName(filename);
   const outputFilename = resolvePdfFilename(filename);
 
@@ -142,10 +299,19 @@ export async function POST(request: Request) {
   const tPipeline0 = performance.now();
   try {
     const t0 = performance.now();
+    console.info("api/convert worker attempt", {
+      mode: "multipart",
+      contentType,
+      normalizedInputType: "file",
+      htmlLength: sanitized.length,
+      workerConfigured,
+      workerAttempted: true,
+    });
     const pdf = await convertHtmlToPdf({
       html: sanitized,
       runId: runId ?? undefined,
     });
+    console.info("api/convert worker status", { status: 200, pdfBytes: pdf.length });
     const t1 = performance.now();
     const renderDurationMs = Math.round(t1 - t0);
 
@@ -177,6 +343,12 @@ export async function POST(request: Request) {
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error("POST /api/convert failed:", e);
+    if (e instanceof PdfWorkerError) {
+      console.error("api/convert worker status", {
+        status: e.status ?? 502,
+        details: e.details ?? e.message,
+      });
+    }
     if (runId) {
       try {
         await markConversionFailed({

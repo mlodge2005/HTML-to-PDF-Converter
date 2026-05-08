@@ -153,12 +153,12 @@ export default function Home() {
       </footer>
 
       <ConvertModal
-        key={openRound}
+        key={`convert-${openRound}`}
         isOpen={open}
         onClose={() => setOpen(false)}
       />
       <PngToSvgModal
-        key={pngOpenRound}
+        key={`image-${pngOpenRound}`}
         isOpen={pngOpen}
         onClose={() => setPngOpen(false)}
       />

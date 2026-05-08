@@ -12,6 +12,7 @@ type ConvertModalProps = {
 };
 
 const GENERIC = "Something went wrong. Please try again.";
+const IS_DEV = process.env.NODE_ENV !== "production";
 
 export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
   const titleId = useId();
@@ -44,6 +45,12 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
       setMessage("Please choose an HTML file.");
       return;
     }
+    const fileText = await file.text().catch(() => "");
+    if (!fileText.trim()) {
+      setState("error");
+      setMessage("Missing input. Provide html/content or url.");
+      return;
+    }
 
     setState("loading");
     setMessage("");
@@ -54,13 +61,24 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
 
     try {
       const res = await fetch("/api/convert", { method: "POST", body: formData });
-      const data: unknown = await res.json();
+      const responseText = await res.text();
+      let data: unknown = null;
+      try {
+        data = responseText ? (JSON.parse(responseText) as unknown) : null;
+      } catch {
+        data = null;
+      }
       if (
         !data ||
         typeof data !== "object" ||
         !("ok" in data) ||
         typeof (data as { ok: unknown }).ok !== "boolean"
       ) {
+        if (!res.ok) {
+          setState("error");
+          setMessage(responseText || GENERIC);
+          return;
+        }
         setState("error");
         setMessage(GENERIC);
         return;
@@ -68,12 +86,23 @@ export function ConvertModal({ isOpen, onClose }: ConvertModalProps) {
       const body = data as {
         ok: boolean;
         error?: string;
+        details?: string;
         fieldErrors?: FieldErrors;
         message?: string;
+        status?: number;
       };
       if (!res.ok || !body.ok) {
+        if (IS_DEV) {
+          console.error("convert_api_error", {
+            status: res.status,
+            error: body.error ?? null,
+            details: body.details ?? null,
+            fieldErrors: body.fieldErrors ?? null,
+            body,
+          });
+        }
         setState("error");
-        setMessage(body.error || GENERIC);
+        setMessage(body.details || body.error || GENERIC);
         if (body.fieldErrors) setFieldErrors(body.fieldErrors);
         return;
       }
